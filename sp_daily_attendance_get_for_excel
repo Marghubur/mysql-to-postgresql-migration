@@ -1,0 +1,88 @@
+CREATE OR REPLACE FUNCTION public.sp_daily_attendance_get_for_excel(
+  IN _searchstring varchar(250),
+  IN _sortby varchar(50),
+  IN _pageindex integer,
+  IN _pagesize integer
+)
+RETURNS SETOF "daily_attendance"
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  _sqlstate TEXT;
+  _errorno TEXT;
+  _errortext TEXT;
+  _message TEXT;
+  _result TEXT;
+  _selectquery TEXT;
+BEGIN
+  begin
+ begin
+ if(_sortby is null or _sortby = '') then
+ begin
+ _sortby := ' a.AttendanceDate DESC ';
+ end;
+ end if;
+ _selectquery := concat('Select * from (
+  Select 
+  Row_Number() over(Order by ', _sortby, ') as RowIndex,
+  a.AttendanceId,
+  a.EmployeeId,
+  a.EmployeeName,
+  a.EmployeeEmail,
+  a.ReviewerId,
+  a.ReviewerName,
+  a.ReviewerEmail,
+  a.ProjectId,
+  a.TaskId, 
+  a.TaskType,
+  a.LogOn,
+  a.LogOff,
+  a.TotalMinutes,
+  a.Comments, 
+  a.AttendanceStatus,
+  a.WeekOfYear,
+  a.AttendanceDate,
+  a.WorkTypeId,
+  a.IsOnLeave,
+  a.LeaveId,
+  a.UpdatedOn,
+  Case 
+  When a.AttendanceDate = c.CalendarDate 
+  and c.IsHoliday = true then true
+  Else false
+  End
+  IsHoliday,
+  Case 
+  When AttendanceDate = c.CalendarDate and c.IsHoliday = true then c.CompanyCalendarId
+  Else 0
+  End
+  HolidayId,
+  ep.DOB, 
+  ep.Gender, 
+  epf.UniversalAccountNumber as UAN, 
+  epf.PFNumber,
+  Count(1) Over() as Total 
+  FROM daily_attendance a
+  left Join company_calendar c on a. AttendanceDate = c.CalendarDate
+  left join employees e on e.EmployeeUid = a.EmployeeId
+  left join employeepersonaldetail ep on ep.EmployeeUid = a.EmployeeId
+  left join employee_pf_detail epf on epf.EmployeeId = a.EmployeeId
+  where e.IsActive = TRUE AND ', _searchstring, '
+  )T where RowIndex between ', (_pageindex - 1) * _pagesize + 1 ,' and ', (_pageindex * _pagesize)) ;
+ RETURN QUERY EXECUTE _selectquery;RETURN QUERY select * from leave_request_notification;
+ -- postgres query warning: Multiple result sets are not supported in functions. Commented out: 
+select * from company;
+ -- postgres query warning: Multiple result sets are not supported in functions. Commented out: 
+select * from company_calendar
+ where year = year(timezone('utc', now()))
+ and isholiday = true;
+ end;
+ end;
+EXCEPTION WHEN OTHERS THEN
+  _sqlstate := SQLSTATE;
+  _errortext := SQLERRM;
+  _errorno := SQLSTATE;
+  _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
+  CALL public.sp_logexception(_message, '', 'sp_daily_attendance_get_for_excel', 1::bit, 0::bit, _result);
+END;
+$$;
