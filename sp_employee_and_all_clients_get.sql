@@ -1,95 +1,142 @@
-DROP FUNCTION IF EXISTS public.sp_employee_and_all_clients_get(varchar, varchar, int4, int4);
+DROP PROCEDURE IF EXISTS public.sp_employee_and_all_clients_get(
+    varchar,
+    varchar,
+    integer,
+    integer,
+    refcursor
+);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_and_all_clients_get(
-    _searchstring character varying, 
-    _sortby character varying, 
-    _pageindex integer, 
-    _pagesize integer
-)
-RETURNS TABLE (
-    RowIndex bigint,
-    EmployeeUid bigint,
-    FirstName character varying,
-    ClientUid integer,
-    LastName character varying,
-    Mobile character varying,
-    Email character varying,
-    IsActive boolean,
-    CreatedOn timestamp without time zone,
-    ReportingManagerId bigint,
-    ClientJson json,
-    EmployeeCurrentRegime character varying, 
-    DOB timestamp without time zone,
-    UpdatedOn timestamp without time zone,
-    Total bigint
+CREATE OR REPLACE PROCEDURE public.sp_employee_and_all_clients_get(
+    IN _searchstring character varying,
+    IN _sortby character varying,
+    IN _pageindex integer,
+    IN _pagesize integer,
+    INOUT _result_cursor refcursor
 )
 LANGUAGE plpgsql
-AS $function$
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
-    _result character varying;
+    _result VARCHAR;
     _selectquery TEXT;
     _currentfinancialyear bigint;
 BEGIN
-    -- Safely get current financial year
+
+    -- Get current financial year
     _currentfinancialyear := 0;
-    select financialyear into _currentfinancialyear from company_setting where isprimary = true;
 
-    if(_sortby is null or _sortby = '') then
-        _sortby := 'UpdatedOn Desc, CreatedOn Desc';
-    end if;
-    
-    if(_searchstring is null or _searchstring = '') then
+    SELECT financialyear
+    INTO _currentfinancialyear
+    FROM company_setting
+    WHERE isprimary = true
+    LIMIT 1;
+
+
+    -- Default sorting
+    IF (_sortby IS NULL OR _sortby = '') THEN
+        _sortby := 'UpdatedOn DESC, CreatedOn DESC';
+    END IF;
+
+
+    -- Default search condition
+    IF (_searchstring IS NULL OR _searchstring = '') THEN
         _searchstring := '1=1';
-    end if;
+    END IF;
 
-    -- FIXED: Replaced SQL Server JSON functions with Postgres json_agg & json_build_object
-    -- FIXED: Concatenated _currentfinancialyear into the string instead of @currentFinancialYear
-    _selectquery := concat('Select * from (
-                    Select 
-                        Row_Number() over(Order by ', _sortby, ') as RowIndex,
-                        emp.EmployeeUid, 
-                        emp.FirstName,
-                        0::integer as ClientUid,
-                        emp.LastName,
-                        emp.Mobile,
-                        emp.Email,
-                        emp.IsActive,
-                        emp.CreatedOn,
-                        emp.ReportingManagerId,
-                        (
-                            Select json_agg(
-                                json_build_object(
-                                    ''CompanyId'', ClientUid,
-                                    ''CompanyName'', ClientName,
-                                    ''ActualPackage'', ActualPackage
-                                )
-                            )
-                            from employeemappedclients 
-                            where EmployeeUid = emp.EmployeeUid and IsActive = true
-                        ) as ClientJson,
-                        (select EmployeeCurrentRegime::varchar from employee_declaration where EmployeeId = emp.EmployeeUid and DeclarationFromYear = ', _currentfinancialyear, ') as EmployeeCurrentRegime,
-                        (select DOB from employeepersonaldetail where EmployeeUid = emp.EmployeeUid) as DOB,
-                        emp.UpdatedOn,
-                        Count(1) Over() as Total 
-                    from employees emp
-                    Where ', _searchstring, '
-                ) T where RowIndex between ', ((_pageindex - 1 ) * _pagesize + 1), ' and ', (_pageindex * _pagesize));
- 
-    RETURN QUERY EXECUTE _selectquery;
-    
-    -- FIXED: Removed "RETURN QUERY select * from clients;" to prevent schema crashes
-    
-EXCEPTION WHEN OTHERS THEN
-    _sqlstate := SQLSTATE;
-    _errortext := SQLERRM;
-    _errorno := SQLSTATE;
-    _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
-    
-    -- FIXED: Added ::varchar casts so the logger doesn't crash
-    CALL sp_logexception(_message, ''::varchar, 'sp_employee_and_all_clients_get'::varchar, 1, 0, _result);
+
+    -- Build dynamic query
+    _selectquery := concat(
+        'SELECT * FROM (
+            SELECT
+                ROW_NUMBER() OVER (
+                    ORDER BY ', _sortby, '
+                ) AS RowIndex,
+
+                emp.EmployeeUid,
+                emp.FirstName,
+                0::integer AS ClientUid,
+                emp.LastName,
+                emp.Mobile,
+                emp.Email,
+                emp.IsActive,
+                emp.CreatedOn,
+                emp.ReportingManagerId,
+
+                (
+                    SELECT json_agg(
+                        json_build_object(
+                            ''CompanyId'', ClientUid,
+                            ''CompanyName'', ClientName,
+                            ''ActualPackage'', ActualPackage
+                        )
+                    )
+                    FROM employeemappedclients
+                    WHERE EmployeeUid = emp.EmployeeUid
+                      AND IsActive = true
+                ) AS ClientJson,
+
+                (
+                    SELECT EmployeeCurrentRegime::varchar
+                    FROM employee_declaration
+                    WHERE EmployeeId = emp.EmployeeUid
+                      AND DeclarationFromYear = ',
+                      _currentfinancialyear,
+                '
+                ) AS EmployeeCurrentRegime,
+
+                (
+                    SELECT DOB
+                    FROM employeepersonaldetail
+                    WHERE EmployeeUid = emp.EmployeeUid
+                ) AS DOB,
+
+                emp.UpdatedOn,
+
+                COUNT(1) OVER() AS Total
+
+            FROM employees emp
+            WHERE ', _searchstring, '
+        ) T
+        WHERE RowIndex BETWEEN ',
+        ((_pageindex - 1) * _pagesize + 1),
+        ' AND ',
+        (_pageindex * _pagesize)
+    );
+
+
+    -- Open cursor with dynamic query
+    OPEN _result_cursor FOR EXECUTE _selectquery;
+
+
+EXCEPTION
+    WHEN OTHERS THEN
+
+        _sqlstate := SQLSTATE;
+        _errortext := SQLERRM;
+        _errorno := SQLSTATE;
+
+        _message := concat(
+            'ERROR ',
+            _errorno,
+            ' (',
+            _sqlstate,
+            '): ',
+            _errortext
+        );
+
+        CALL sp_logexception(
+            _message,
+            ''::varchar,
+            'sp_employee_and_all_clients_get'::varchar,
+            1,
+            0,
+            _result
+        );
+
+        RAISE EXCEPTION '%', _errortext;
+
 END;
-$function$;
+$procedure$;
