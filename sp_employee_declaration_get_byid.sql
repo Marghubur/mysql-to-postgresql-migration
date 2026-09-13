@@ -1,9 +1,11 @@
--- DROP FUNCTION public.sp_employee_declaration_get_byid(int8);
+DROP PROCEDURE IF EXISTS public.sp_employee_declaration_get_byid(bigint, refcursor);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_declaration_get_byid(_employeedeclarationid bigint)
- RETURNS SETOF employee_declaration
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_declaration_get_byid(
+    _employeedeclarationid bigint,
+    INOUT _result_ref refcursor DEFAULT 'rs_declaration_by_id'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -11,20 +13,17 @@ DECLARE
     _message TEXT;
     _result TEXT;
 BEGIN
-    begin
- 
- 
- RETURN QUERY select 
- *
- from employee_declaration
- where employeedeclarationid = _employeedeclarationid;
- end;
+    OPEN _result_ref FOR 
+        SELECT * 
+        FROM employee_declaration
+        WHERE employeedeclarationid = _employeedeclarationid;
+
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
     _errorno := SQLSTATE;
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
+    
     CALL sp_logexception(_message, '', 'sp_employee_declaration_get_byid', 1, 0, _result);
 END;
-$function$
-;
+$procedure$;
