@@ -1,9 +1,11 @@
-DROP FUNCTION IF EXISTS public.sp_employee_declaration_detail_get(bigint);
+DROP PROCEDURE IF EXISTS public.sp_employee_declaration_detail_get(bigint, jsonb);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_declaration_detail_get(_employeeid bigint)
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_declaration_detail_get(
+    _employeeid bigint,
+    INOUT _response jsonb DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -11,11 +13,10 @@ DECLARE
     _message TEXT;
     _result character varying;
     _currentfinancialyear bigint;
-    _response jsonb;
 BEGIN
     _currentfinancialyear := 0;
     
-    -- FIXED: Fetch current financial year safely
+    -- Fetch current financial year safely
     SELECT financialyear INTO _currentfinancialyear 
     FROM company_setting 
     WHERE isprimary 
@@ -25,7 +26,7 @@ BEGIN
         _currentfinancialyear := 0;
     END IF;
 
-    -- FIXED: Using jsonb aggregation to return dynamic/mixed table attributes cleanly
+    -- Aggregate results directly into the _response INOUT parameter
     SELECT COALESCE(json_agg(
         json_build_object(
             'declaration', row_to_json(d),
@@ -39,8 +40,6 @@ BEGIN
       AND e.isactive = true
       AND d.declarationfromyear = _currentfinancialyear;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -48,6 +47,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_declaration_detail_get'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := json_build_object('error', _message)::jsonb;
 END;
-$function$;
+$procedure$;
