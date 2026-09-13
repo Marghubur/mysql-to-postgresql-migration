@@ -1,9 +1,12 @@
---DROP FUNCTION IF EXISTS public.sp_employee_exit_assign_byid(bigint, bigint);
+DROP PROCEDURE IF EXISTS public.sp_employee_exit_assign_byid(bigint, bigint, jsonb);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_exit_assign_byid(_employeeid bigint, _assigneid bigint)
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_exit_assign_byid(
+    _employeeid bigint, 
+    _assigneid bigint,
+    INOUT _response jsonb DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -12,7 +15,6 @@ DECLARE
     _result character varying;
     _departmentid bigint;
     _rolename TEXT;
-    _response jsonb;
 BEGIN
     _departmentid := 0;
     SELECT departmentid INTO _departmentid 
@@ -24,7 +26,7 @@ BEGIN
     FROM employee_exit_configuration 
     WHERE departmentid = _departmentid;
 
-    -- FIXED: Replaced SETOF row mismatch by aggregating employee_exit_clearance rows into a JSONB array.
+    -- Aggregate clearance rows directly into the INOUT parameter
     SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) INTO _response
     FROM (
         SELECT * 
@@ -33,8 +35,6 @@ BEGIN
           AND clearancebyname = _rolename
     ) t;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -42,6 +42,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_exit_assign_byid'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := json_build_object('error', _message)::jsonb;
 END;
-$function$;
+$procedure$;
