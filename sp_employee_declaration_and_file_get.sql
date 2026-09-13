@@ -1,14 +1,12 @@
-CREATE OR REPLACE FUNCTION public.sp_employee_declaration_and_file_get(_declarationid bigint, _fileid bigint)
- RETURNS TABLE (
-    employeedeclarationid bigint,
-    employeeid bigint,
-    documentpath character varying,
-    declarationdetail text,
-    houserentdetail jsonb,
-    totaldeclaredamount numeric
- )
- LANGUAGE plpgsql
-AS $function$
+DROP PROCEDURE IF EXISTS public.sp_employee_declaration_and_file_get(bigint, bigint, refcursor);
+
+CREATE OR REPLACE PROCEDURE public.sp_employee_declaration_and_file_get(
+    _declarationid bigint, 
+    _fileid bigint,
+    INOUT _result_ref refcursor DEFAULT 'rs_declaration_and_file'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -16,17 +14,17 @@ DECLARE
     _message TEXT;
     _result character varying;
 BEGIN
-    RETURN QUERY 
-    SELECT 
-        d.employeedeclarationid,
-        d.employeeid,
-        d.documentpath,
-        d.declarationdetail,
-        d.houserentdetail,
-        d.totaldeclaredamount
-    FROM employee_declaration d
-    WHERE d.employeedeclarationid = _declarationid;
-    
+    OPEN _result_ref FOR 
+        SELECT 
+            d.employeedeclarationid,
+            d.employeeid,
+            d.documentpath,
+            d.declarationdetail,
+            d.houserentdetail,
+            d.totaldeclaredamount
+        FROM employee_declaration d
+        WHERE d.employeedeclarationid = _declarationid;
+        
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -35,4 +33,4 @@ EXCEPTION WHEN OTHERS THEN
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_declaration_and_file_get'::varchar, 1, 0, _result);
 END;
-$function$;
+$procedure$;
