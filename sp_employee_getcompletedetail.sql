@@ -1,13 +1,12 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_getcompletedetail(bigint, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_getcompletedetail(bigint);
-DROP PROCEDURE IF EXISTS public.sp_employee_getcompletedetail(bigint);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_getcompletedetail(
-    IN _employeeid bigint
+CREATE OR REPLACE PROCEDURE public.sp_employee_getcompletedetail(
+    IN _employeeid bigint,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -15,18 +14,16 @@ DECLARE
     _message TEXT;
     _result character varying;
     _currentfinancialyear bigint;
-    _response jsonb;
 BEGIN
-    _currentfinancialyear := 0;
-    SELECT financialyear INTO _currentfinancialyear 
+    -- Retrieve active financial year with fallback to 0
+    SELECT COALESCE(financialyear, 0) INTO _currentfinancialyear 
     FROM company_setting
-    WHERE isprimary = 1 OR isprimary = true;
+    WHERE isprimary = 1 OR isprimary = true
+    LIMIT 1;
     
-    IF _currentfinancialyear IS NULL THEN
-        _currentfinancialyear := 0;
-    END IF;
+    _currentfinancialyear := COALESCE(_currentfinancialyear, 0);
 
-    -- Bundled all individual queries and result sets into a single unified JSONB structure
+    -- Construct JSONB object directly into INOUT response parameter
     SELECT jsonb_build_object(
         'employee', (
             SELECT COALESCE(jsonb_agg(to_jsonb(e)), '[]'::jsonb) 
@@ -80,8 +77,6 @@ BEGIN
         )
     ) INTO _response;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -89,6 +84,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_getcompletedetail'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
