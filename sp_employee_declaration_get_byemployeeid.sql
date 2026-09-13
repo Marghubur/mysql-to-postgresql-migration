@@ -1,9 +1,12 @@
---DROP FUNCTION IF EXISTS public.sp_employee_declaration_get_byemployeeid(bigint, integer);
+DROP PROCEDURE IF EXISTS public.sp_employee_declaration_get_byemployeeid(bigint, integer, jsonb);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_declaration_get_byemployeeid(_employeeid bigint, _usertypeid integer)
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_declaration_get_byemployeeid(
+    _employeeid bigint, 
+    _usertypeid integer,
+    INOUT _response jsonb DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -11,7 +14,6 @@ DECLARE
     _message TEXT;
     _result character varying;
     _currentfinancialyear bigint;
-    _response jsonb;
 BEGIN
     _currentfinancialyear := 0;
     
@@ -24,8 +26,7 @@ BEGIN
         _currentfinancialyear := 0;
     END IF;
 
-    -- Aggregate multiple result sets into a single JSON object to bypass 
-    -- PostgreSQL's single-result-set restriction for functions
+    -- Aggregate multiple result sets into the JSON INOUT parameter
     SELECT json_build_object(
         'declarations', (
             SELECT COALESCE(json_agg(
@@ -48,8 +49,6 @@ BEGIN
         )
     ) INTO _response;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -57,6 +56,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_declaration_get_byemployeeid'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := json_build_object('error', _message)::jsonb;
 END;
-$function$;
+$procedure$;
