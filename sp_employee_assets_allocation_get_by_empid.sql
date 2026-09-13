@@ -1,13 +1,9 @@
-CREATE OR REPLACE FUNCTION public.sp_employee_assets_allocation_get_by_empid(_employeeid bigint)
- RETURNS TABLE (
-    EmployeeAssetsAllocationId bigint,
-    EmployeeId bigint,
-    AssetStatus character varying,   -- FIXED: Added the missing comma right here!
-    AllocatedByName text,            
-    ReturnHandleByName text
- )
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_assets_allocation_get_by_empid(
+    _employeeid bigint,
+    INOUT _result_ref refcursor DEFAULT 'rs_assets'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -15,16 +11,16 @@ DECLARE
     _message TEXT;
     _result character varying; 
 BEGIN
-    RETURN QUERY 
-    SELECT 
-        ea.*, 
-        concat(e.firstname, ' ', e.lastname)::text as allocatedbyname, 
-        concat(es.firstname, ' ', es.lastname)::text as returnhandlebyname 
-    FROM employee_assets_allocation ea
-    LEFT JOIN employees e on e.employeeuid = ea.allocatedby
-    LEFT JOIN employees es on es.employeeuid = ea.returnedhandledby
-    WHERE ea.employeeid = _employeeid;
-    
+    OPEN _result_ref FOR 
+        SELECT 
+            ea.*, 
+            concat(e.firstname, ' ', e.lastname)::text as allocatedbyname, 
+            concat(es.firstname, ' ', es.lastname)::text as returnhandlebyname 
+        FROM employee_assets_allocation ea
+        LEFT JOIN employees e on e.employeeuid = ea.allocatedby
+        LEFT JOIN employees es on es.employeeuid = ea.returnedhandledby
+        WHERE ea.employeeid = _employeeid;
+
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -33,4 +29,4 @@ EXCEPTION WHEN OTHERS THEN
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_assets_allocation_get_by_empid'::varchar, 1, 0, _result);
 END;
-$function$;
+$procedure$;
