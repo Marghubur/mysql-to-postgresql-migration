@@ -1,66 +1,62 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_getbyid_to_reg_or_upd_by_excel(bigint, character varying, character varying, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_getbyid_to_reg_or_upd_by_excel(bigint, character varying, character varying, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_getbyid_to_reg_or_upd_by_excel(bigint, character varying, character varying, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_getbyid_to_reg_or_upd_by_excel(
+CREATE OR REPLACE PROCEDURE public.sp_employee_getbyid_to_reg_or_upd_by_excel(
     IN _employeeid bigint, 
     IN _mobile character varying, 
     IN _email character varying, 
-    IN _companyid integer
+    IN _companyid integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
     _result character varying;
-    _employeecount bigint;
-    _mobilecount bigint;
-    _financialyear bigint;
-    _emailcount bigint;
-    _response jsonb;
+    _employeecount bigint := 0;
+    _mobilecount bigint := 0;
+    _emailcount bigint := 0;
+    _financialyear bigint := 0;
+    _is_active_employee boolean := FALSE;
 BEGIN
-    _emailcount := 0;
-    _mobilecount := 0;
-    _employeecount := 0;
-    
-    IF EXISTS (SELECT 1 FROM employees e WHERE e.employeeuid = _employeeid AND e.isactive = true) THEN 
+    -- Single query check to establish existence and active status
+    SELECT EXISTS (
+        SELECT 1 FROM employees 
+        WHERE employeeuid = _employeeid AND isactive = true
+    ) INTO _is_active_employee;
+
+    IF _is_active_employee THEN 
         _employeecount := 1;
         
-        SELECT count(e.employeeuid) INTO _emailcount 
-        FROM employees e
-        WHERE e.email = _email AND e.employeeuid <> _employeeid;
-        
-        SELECT count(e.employeeuid) INTO _mobilecount 
-        FROM employees e
-        WHERE e.mobile = _mobile AND e.employeeuid <> _employeeid;
+        -- Combined count queries into a single scan over filtered rows
+        SELECT 
+            COUNT(1) FILTER (WHERE email = _email AND employeeuid <> _employeeid),
+            COUNT(1) FILTER (WHERE mobile = _mobile AND employeeuid <> _employeeid)
+        INTO _emailcount, _mobilecount
+        FROM employees
+        WHERE email = _email OR mobile = _mobile;
     ELSE
-        SELECT count(e.employeeuid) INTO _employeecount 
-        FROM employees e
-        WHERE e.employeeuid = _employeeid;
-        
-        SELECT count(e.employeeuid) INTO _emailcount 
-        FROM employees e
-        WHERE e.email = _email;
-        
-        SELECT count(e.employeeuid) INTO _mobilecount 
-        FROM employees e
-        WHERE e.mobile = _mobile; 
+        SELECT 
+            COUNT(1) FILTER (WHERE employeeuid = _employeeid),
+            COUNT(1) FILTER (WHERE email = _email),
+            COUNT(1) FILTER (WHERE mobile = _mobile)
+        INTO _employeecount, _emailcount, _mobilecount
+        FROM employees
+        WHERE employeeuid = _employeeid OR email = _email OR mobile = _mobile;
     END IF;
 
-    _financialyear := 0;
-    SELECT financialyear INTO _financialyear
+    -- Fetch financial year setting with fallback
+    SELECT COALESCE(financialyear, 0) INTO _financialyear
     FROM company_setting
-    WHERE CASE WHEN _companyid > 0 THEN companyid = _companyid ELSE isprimary = 1 END;
-    
-    IF _financialyear IS NULL THEN
-        _financialyear := 0;
-    END IF;
+    WHERE CASE WHEN _companyid > 0 THEN companyid = _companyid ELSE isprimary = 1 END
+    LIMIT 1;
 
-    -- Bundled all original result sets and metadata counts into a structured JSONB object
+    _financialyear := COALESCE(_financialyear, 0);
+
+    -- Construct JSONB output payload
     SELECT jsonb_build_object(
         'employee', (
             SELECT COALESCE(jsonb_agg(to_jsonb(e)), '[]'::jsonb) 
@@ -83,8 +79,6 @@ BEGIN
             'emailcount', _emailcount
         )
     ) INTO _response;
-
-    RETURN _response;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -93,6 +87,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_getbyid_to_reg_or_upd_by_excel'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
