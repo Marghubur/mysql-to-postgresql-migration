@@ -1,14 +1,12 @@
--- Drop both procedure and function variants to completely clear the routine kind conflict
-DROP PROCEDURE IF EXISTS public.sp_employee_inactive_update(bigint);
+DROP PROCEDURE IF EXISTS public.sp_employee_inactive_update(bigint, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_inactive_update(bigint);
 
--- Recreate cleanly as a FUNCTION returning jsonb
-CREATE OR REPLACE FUNCTION public.sp_employee_inactive_update(
-    IN _employeeuid bigint
+CREATE OR REPLACE PROCEDURE public.sp_employee_inactive_update(
+    IN _employeeuid bigint,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -16,7 +14,6 @@ DECLARE
     _message TEXT;
     _result character varying;
     _processingresult character varying;
-    _response jsonb;
 BEGIN
     UPDATE employees 
     SET isactive = false 
@@ -28,8 +25,6 @@ BEGIN
         'status', _processingresult,
         'employeeuid', _employeeuid
     );
-
-    RETURN _response;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -38,6 +33,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_inactive_update'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
