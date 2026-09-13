@@ -1,17 +1,16 @@
--- Drop existing procedure or function variants to prevent routine kind conflicts
-DROP PROCEDURE IF EXISTS public.sp_employee_getall(character varying, character varying, integer, integer, integer);
+DROP PROCEDURE IF EXISTS public.sp_employee_getall(character varying, character varying, integer, integer, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_getall(character varying, character varying, integer, integer, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_getall(
+CREATE OR REPLACE PROCEDURE public.sp_employee_getall(
     IN _searchstring character varying, 
     IN _sortby character varying, 
     IN _pageindex integer, 
     IN _pagesize integer, 
-    IN _financialyear integer
+    IN _financialyear integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -20,7 +19,6 @@ DECLARE
     _result character varying;
     _selectquery TEXT;
     _activequery TEXT;
-    _response jsonb;
 BEGIN
     IF _sortby IS NULL OR _sortby = '' THEN
         _sortby := 'UpdatedOn DESC, CreatedOn DESC';
@@ -88,8 +86,6 @@ BEGIN
     -- Maintain side-effect execution of the health status procedure
     CALL sp_record_health_status_get_incomplete_profile(_financialyear);
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -97,6 +93,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_getall'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
