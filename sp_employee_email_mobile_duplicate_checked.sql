@@ -1,45 +1,34 @@
--- DROP FUNCTION public.sp_employee_email_mobile_duplicate_checked(varchar, varchar);
+DROP PROCEDURE IF EXISTS public.sp_employee_email_mobile_duplicate_checked(character varying, character varying, jsonb);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_email_mobile_duplicate_checked(_mobile character varying, _email character varying)
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_email_mobile_duplicate_checked(
+    _mobile character varying, 
+    _email character varying,
+    INOUT _response jsonb DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
-    _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
-    _result character varying;
-    _mobilecount bigint;
-    _emailcount bigint;
-    _response jsonb;
+    _dummy_result character varying;
 BEGIN
-    _emailcount := 0;
-    _mobilecount := 0;
-    
-    SELECT count(e.employeeuid) INTO _emailcount 
-    FROM employees e
-    WHERE e.email = _email;
-    
-    SELECT count(e.employeeuid) INTO _mobilecount 
-    FROM employees e
-    WHERE e.mobile = _mobile;
-    
+    -- Perform both counts in a single table scan
     SELECT jsonb_build_object(
-        'mobile_count', _mobilecount,
-        'email_count', _emailcount
-    ) INTO _response;
+        'mobile_count', COUNT(*) FILTER (WHERE e.mobile = _mobile),
+        'email_count',  COUNT(*) FILTER (WHERE e.email = _email)
+    )
+    INTO _response
+    FROM employees e
+    WHERE e.mobile = _mobile OR e.email = _email;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
-    _sqlstate := SQLSTATE;
+    _sqlstate  := SQLSTATE;
     _errortext := SQLERRM;
-    _errorno := SQLSTATE;
-    _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
+    _message   := concat('ERROR (', _sqlstate, '): ', _errortext);
     
-    CALL sp_logexception(_message, ''::varchar, 'sp_employee_email_mobile_duplicate_checked'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    CALL sp_logexception(_message, ''::varchar, 'sp_employee_email_mobile_duplicate_checked'::varchar, 1, 0, _dummy_result);
+    
+    _response := jsonb_build_object('error', _message);
 END;
-$function$
-;
+$procedure$;
