@@ -1,24 +1,22 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_get_reimburs_adhoc_and_deduction(integer, integer, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_get_reimburs_adhoc_and_deduction(integer, integer, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_get_reimburs_adhoc_and_deduction(integer, integer, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_get_reimburs_adhoc_and_deduction(
+CREATE OR REPLACE PROCEDURE public.sp_employee_get_reimburs_adhoc_and_deduction(
     IN _companyid integer, 
     IN _formonth integer, 
-    IN _foryear integer
+    IN _foryear integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
     _result character varying;
-    _response jsonb;
 BEGIN
-    -- Aggregated rows into a JSONB array to support structured API responses
+    -- Aggregate joined rows directly into the INOUT parameter
     SELECT COALESCE(jsonb_agg(to_jsonb(sub)), '[]'::jsonb) INTO _response
     FROM (
         SELECT 
@@ -38,10 +36,7 @@ BEGIN
             h.comments,
             b.amount,
             ct.componentdescription,
-            CASE
-                WHEN h.salaryadhocid IS NULL THEN 0
-                ELSE h.salaryadhocid
-            END AS salaryadhocid
+            COALESCE(h.salaryadhocid, 0) AS salaryadhocid
         FROM reimburs_adhoc_and_deduction b
         LEFT JOIN hike_bonus_salary_adhoc h ON h.employeeid = b.employeeid 
         LEFT JOIN salary_components s ON s.componentid = b.componentid
@@ -53,8 +48,6 @@ BEGIN
           AND e.isactive = true
     ) sub;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -62,6 +55,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_get_reimburs_adhoc_and_deduction'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
