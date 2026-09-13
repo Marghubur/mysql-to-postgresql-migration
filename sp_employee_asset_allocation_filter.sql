@@ -1,32 +1,14 @@
-DROP FUNCTION IF EXISTS public.sp_employee_asset_allocation_filter(varchar, varchar, int4, int4);
+DROP PROCEDURE IF EXISTS public.sp_employee_asset_allocation_filter(varchar, varchar, int4, int4, refcursor);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_asset_allocation_filter(
+CREATE OR REPLACE PROCEDURE public.sp_employee_asset_allocation_filter(
     _searchstring character varying, 
     _sortby character varying, 
     _pageindex integer, 
-    _pagesize integer
+    _pagesize integer,
+    INOUT _result_ref refcursor DEFAULT 'rs_allocation_filter'
 )
- RETURNS TABLE (
-    RowIndex bigint,
-    employeeassetsallocationid bigint,
-    employeeid bigint,
-    productid bigint,
-    allocatedon timestamp without time zone,
-    allocatedby bigint,
-    returnstatus bit,
-    returnedon timestamp without time zone,
-    commentsonreturneditem character varying,
-    returnedhandledby bigint,
-    remarks character varying,
-    EmployeeName text,
-    AllocatedByName text,
-    ReturnedHandledByName text,
-    AssetName character varying,
-    CatagoryName character varying,
-    Total bigint
- )
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -63,8 +45,8 @@ BEGIN
         ') T ',
         'WHERE RowIndex BETWEEN ', ((_pageindex - 1) * _pagesize + 1), ' AND ', (_pageindex * _pagesize)
     );
- 
-    RETURN QUERY EXECUTE _selectquery;
+
+    OPEN _result_ref FOR EXECUTE _selectquery;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -74,4 +56,4 @@ EXCEPTION WHEN OTHERS THEN
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_asset_allocation_filter'::varchar, 1, 0, _result);
 END;
-$function$;
+$procedure$;
