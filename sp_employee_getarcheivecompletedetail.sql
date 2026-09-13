@@ -1,31 +1,30 @@
--- DROP FUNCTION public.sp_employee_getarcheivecompletedetail(int8);
+DROP PROCEDURE IF EXISTS public.sp_employee_getarcheivecompletedetail(bigint, refcursor);
+DROP FUNCTION IF EXISTS public.sp_employee_getarcheivecompletedetail(bigint);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_getarcheivecompletedetail(_employeeid bigint)
- RETURNS SETOF employee_archive
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_getarcheivecompletedetail(
+    IN _employeeid bigint,
+    INOUT _result_cursor refcursor DEFAULT 'rs_cursor'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
-    _result TEXT;
+    _log_result TEXT;
 BEGIN
-    begin
- 
- 
- RETURN QUERY select * from employee_archive
- where employeeid = _employeeid;
- 
- 
- 
- end;
+    OPEN _result_cursor FOR 
+    SELECT * 
+    FROM employee_archive
+    WHERE employeeid = _employeeid;
+
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
     _errorno := SQLSTATE;
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
-    CALL sp_logexception(_message, '', 'sp_employee_getarcheivecompletedetail', 1, 0, _result);
+    
+    CALL sp_logexception(_message, ''::varchar, 'sp_employee_getarcheivecompletedetail'::varchar, 1, 0, _log_result);
 END;
-$function$
-;
+$procedure$;
