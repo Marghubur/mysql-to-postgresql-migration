@@ -1,8 +1,7 @@
--- Drop any existing procedure or function signature to prevent routine kind conflicts
-DROP PROCEDURE IF EXISTS public.sp_employee_exit_initiate(bigint, bigint, character varying, integer, timestamp without time zone, character varying, timestamp without time zone, character varying, bigint, timestamp without time zone);
+DROP PROCEDURE IF EXISTS public.sp_employee_exit_initiate(bigint, bigint, character varying, integer, timestamp without time zone, character varying, timestamp without time zone, character varying, bigint, timestamp without time zone, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_exit_initiate(bigint, bigint, character varying, integer, timestamp without time zone, character varying, timestamp without time zone, character varying, bigint, timestamp without time zone);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_exit_initiate(
+CREATE OR REPLACE PROCEDURE public.sp_employee_exit_initiate(
     IN _employeenoticeperiodid bigint, 
     IN _employeeid bigint, 
     IN _resigntype character varying, 
@@ -12,11 +11,11 @@ CREATE OR REPLACE FUNCTION public.sp_employee_exit_initiate(
     IN _officiallastworkingday timestamp without time zone, 
     IN _employeecomment character varying, 
     IN _createdby bigint, 
-    IN _requestedlastworkingday timestamp without time zone
+    IN _requestedlastworkingday timestamp without time zone,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -27,9 +26,8 @@ DECLARE
     _nextclearanceid bigint;
     _noticeperiodindays bigint;
     _processingresult character varying;
-    _response jsonb;
 BEGIN
-    IF NOT EXISTS(SELECT * FROM employee_notice_period WHERE employeenoticeperiodid = _employeenoticeperiodid) THEN
+    IF NOT EXISTS(SELECT 1 FROM employee_notice_period WHERE employeenoticeperiodid = _employeenoticeperiodid) THEN
         _employeenoticeperiodid := 0;
         SELECT employeenoticeperiodid INTO _employeenoticeperiodid 
         FROM employee_notice_period
@@ -69,7 +67,7 @@ BEGIN
         WHERE employeeuid = _employeeid;
         
         _nextclearanceid := 0;
-        SELECT COALESCE(max(employeeexitclearanceid), 0) + 1 INTO _nextclearanceid 
+        SELECT COALESCE(max(employeeexitclearanceid), 0) INTO _nextclearanceid 
         FROM employee_exit_clearance;
         
         INSERT INTO employee_exit_clearance (
@@ -137,8 +135,6 @@ BEGIN
         'employeenoticeperiodid', _employeenoticeperiodid
     );
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -146,6 +142,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_exit_initiate'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
