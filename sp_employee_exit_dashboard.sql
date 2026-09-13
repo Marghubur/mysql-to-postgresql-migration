@@ -1,16 +1,15 @@
--- Drop both potential routine kinds to avoid conflict
 DROP FUNCTION IF EXISTS public.sp_employee_exit_dashboard(character varying, character varying, integer, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_exit_dashboard(character varying, character varying, integer, integer);
+DROP PROCEDURE IF EXISTS public.sp_employee_exit_dashboard(character varying, character varying, integer, integer, jsonb);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_exit_dashboard(
+CREATE OR REPLACE PROCEDURE public.sp_employee_exit_dashboard(
     _searchstring character varying, 
     _sortby character varying, 
     _pageindex integer, 
-    _pagesize integer
+    _pagesize integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -18,7 +17,6 @@ DECLARE
     _message TEXT;
     _result character varying;
     _selectquery TEXT;
-    _response jsonb;
 BEGIN
     IF _sortby IS NULL OR _sortby = '' THEN
         _sortby := 'n.CreatedOn DESC';
@@ -28,8 +26,7 @@ BEGIN
         _searchstring := '1=1';
     END IF;
 
-    -- FIXED: Combined paginated list items and dashboard summary metrics into 
-    -- a single JSONB structure to prevent SETOF multi-query conflict errors.
+    -- Dynamic query aggregating dashboard items and metrics directly into the response variable
     _selectquery := concat(
         'SELECT jsonb_build_object(',
         '    ''items'', COALESCE(jsonb_agg(to_jsonb(sub)), ''[]''::jsonb),',
@@ -54,15 +51,13 @@ BEGIN
         '        LEFT JOIN org_hierarchy o ON o.RoleId = e.DesignationId',
         '        LEFT JOIN employeeprofessiondetail epro ON epro.EmployeeUid = n.EmployeeId',
         '        LEFT JOIN org_hierarchy org ON org.RoleId = epro.DepartmentId',
-        '        WHERE ', _searchstring,',',
+        '        WHERE ', _searchstring,
         '    ) T',
         '    WHERE RowIndex BETWEEN ', ((_pageindex - 1) * _pagesize + 1), ' AND ', (_pageindex * _pagesize),
         ') sub'
     );
 
     EXECUTE _selectquery INTO _response;
-    
-    RETURN _response;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -71,6 +66,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_exit_dashboard'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := json_build_object('error', _message)::jsonb;
 END;
-$function$;
+$procedure$;
