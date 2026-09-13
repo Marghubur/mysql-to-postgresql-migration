@@ -1,15 +1,14 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_get_bonus_shift_overtime(integer, integer, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_get_bonus_shift_overtime(integer, integer, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_get_bonus_shift_overtime(integer, integer, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_get_bonus_shift_overtime(
+CREATE OR REPLACE PROCEDURE public.sp_employee_get_bonus_shift_overtime(
     IN _companyid integer, 
     IN _formonth integer, 
-    In _foryear integer
+    IN _foryear integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -17,18 +16,15 @@ DECLARE
     _message TEXT;
     _result character varying;
     _financialyear bigint;
-    _response jsonb;
 BEGIN
-    _financialyear := 0;
-    SELECT financialyear INTO _financialyear 
+    SELECT COALESCE(financialyear, 0) INTO _financialyear 
     FROM company_setting
-    WHERE companyid = _companyid;
+    WHERE companyid = _companyid
+    LIMIT 1;
     
-    IF _financialyear IS NULL THEN
-        _financialyear := 0;
-    END IF;
+    _financialyear := COALESCE(_financialyear, 0);
 
-    -- Aggregated rows into a JSONB array to return structured data cleanly
+    -- Aggregated rows directly into the INOUT parameter
     SELECT COALESCE(jsonb_agg(to_jsonb(sub)), '[]'::jsonb) INTO _response
     FROM (
         SELECT 
@@ -52,10 +48,7 @@ BEGIN
             h.otcalculatedon,
             p.paycalculationid,
             es.completesalarydetail,
-            CASE
-                WHEN h.salaryadhocid IS NULL THEN 0
-                ELSE h.salaryadhocid
-            END AS salaryadhocid
+            COALESCE(h.salaryadhocid, 0) AS salaryadhocid
         FROM bonus_shift_overtime b
         LEFT JOIN hike_bonus_salary_adhoc h ON h.employeeid = b.employeeid 
         LEFT JOIN salary_components s ON s.componentid = b.componentid
@@ -69,8 +62,6 @@ BEGIN
           AND e.isactive = true
     ) sub;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -78,6 +69,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_get_bonus_shift_overtime'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
