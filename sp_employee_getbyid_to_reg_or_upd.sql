@@ -1,16 +1,15 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_getbyid_to_reg_or_upd(bigint, character varying, character varying, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_getbyid_to_reg_or_upd(bigint, character varying, character varying, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_getbyid_to_reg_or_upd(bigint, character varying, character varying, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_getbyid_to_reg_or_upd(
+CREATE OR REPLACE PROCEDURE public.sp_employee_getbyid_to_reg_or_upd(
     IN _employeeid bigint, 
     IN _mobile character varying, 
     IN _email character varying, 
-    IN _companyid integer
+    IN _companyid integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -24,7 +23,6 @@ DECLARE
     _financialyear bigint;
     _startmonth bigint;
     _emailcount bigint;
-    _response jsonb;
 BEGIN
     _emailcount := 0;
     _mobilecount := 0;
@@ -69,8 +67,7 @@ BEGIN
     WHERE companyid = _companyid 
     LIMIT 1;
     
-    -- Bundled all original result sets into a single structured JSONB object 
-    -- to overcome PostgreSQL limitations on multiple result sets in functions.
+    -- Bundle all structured JSON data into the INOUT parameter
     SELECT jsonb_build_object(
         'employee', (
             SELECT COALESCE(jsonb_agg(to_jsonb(e)), '[]'::jsonb) 
@@ -111,8 +108,6 @@ BEGIN
             FROM surcharge_slab ss
         )
     ) INTO _response;
-
-    RETURN _response;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -121,6 +116,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_getbyid_to_reg_or_upd'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
