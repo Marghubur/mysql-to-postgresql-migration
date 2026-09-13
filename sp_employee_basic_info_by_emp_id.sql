@@ -1,18 +1,11 @@
-DROP FUNCTION IF EXISTS public.sp_employee_basic_info_by_emp_id(bigint);
+DROP PROCEDURE IF EXISTS public.sp_employee_basic_info_by_emp_id(bigint, refcursor);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_basic_info_by_emp_id(_employeeid bigint)
- RETURNS TABLE (
-    employeeuid bigint,
-    firstname character varying,
-    lastname character varying,
-    mobile character varying,
-    email character varying,
-    reportingmanager text,
-    designation character varying,
-    dateofjoining timestamp without time zone
- )
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_basic_info_by_emp_id(
+    _employeeid bigint,
+    INOUT _result_ref refcursor DEFAULT 'rs_emp_basic_info'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -20,21 +13,21 @@ DECLARE
     _message TEXT;
     _result character varying; 
 BEGIN
-    RETURN QUERY 
-    SELECT 
-        e.employeeuid,
-        e.firstname,
-        e.lastname,
-        e.mobile,
-        e.email,
-        concat(emp.firstname, ' ', emp.lastname)::text as reportingmanager,
-        o.rolename as designation,
-        e.createdon as dateofjoining
-    FROM employees e
-    LEFT JOIN employees emp on emp.employeeuid = e.reportingmanagerid
-    LEFT JOIN org_hierarchy o on o.roleid = e.designationid
-    WHERE e.employeeuid = _employeeid;
-    
+    OPEN _result_ref FOR 
+        SELECT 
+            e.employeeuid,
+            e.firstname,
+            e.lastname,
+            e.mobile,
+            e.email,
+            concat(emp.firstname, ' ', emp.lastname)::text as reportingmanager,
+            o.rolename as designation,
+            e.createdon as dateofjoining
+        FROM employees e
+        LEFT JOIN employees emp on emp.employeeuid = e.reportingmanagerid
+        LEFT JOIN org_hierarchy o on o.roleid = e.designationid
+        WHERE e.employeeuid = _employeeid;
+        
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -43,4 +36,4 @@ EXCEPTION WHEN OTHERS THEN
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_basic_info_by_emp_id'::varchar, 1, 0, _result);
 END;
-$function$;
+$procedure$;
