@@ -1,15 +1,14 @@
--- Drop existing routine variants to prevent conflicts
+DROP PROCEDURE IF EXISTS public.sp_employee_get_newjoinee_exiting(integer, integer, integer, jsonb);
 DROP FUNCTION IF EXISTS public.sp_employee_get_newjoinee_exiting(integer, integer, integer);
-DROP PROCEDURE IF EXISTS public.sp_employee_get_newjoinee_exiting(integer, integer, integer);
 
-CREATE OR REPLACE FUNCTION public.sp_employee_get_newjoinee_exiting(
+CREATE OR REPLACE PROCEDURE public.sp_employee_get_newjoinee_exiting(
     IN _companyid integer, 
     IN _formonth integer, 
-    IN _foryear integer
+    IN _foryear integer,
+    INOUT _response jsonb DEFAULT NULL
 )
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
@@ -18,86 +17,76 @@ DECLARE
     _result character varying;
     _noticeperioddays bigint;
     _probationperioddays bigint;
-    _response jsonb;
 BEGIN
-    _noticeperioddays := 0;
-    _probationperioddays := 0;
-    
-    SELECT probationperiodindays, noticeperiodindays 
-    INTO _probationperioddays, _noticeperioddays
+    -- Fetch company configuration securely
+    SELECT 
+        COALESCE(probationperiodindays, 0), 
+        COALESCE(noticeperiodindays, 0)
+    INTO 
+        _probationperioddays, 
+        _noticeperioddays
     FROM company_setting 
-    WHERE companyid = _companyid;
+    WHERE companyid = _companyid
+    LIMIT 1;
     
-    IF _probationperioddays IS NULL THEN 
-        _probationperioddays := 0; 
-    END IF;
-    IF _noticeperioddays IS NULL THEN 
-        _noticeperioddays := 0; 
-    END IF;
+    _probationperioddays := COALESCE(_probationperioddays, 0);
+    _noticeperioddays    := COALESCE(_noticeperioddays, 0);
 
-    -- Aggregated rows into a JSONB array, translating datediff to standard PostgreSQL day extractions
+    -- Aggregate results into the INOUT parameter
     SELECT COALESCE(jsonb_agg(to_jsonb(sub)), '[]'::jsonb) INTO _response
     FROM (
-        SELECT e.employeeuid as employeeid, 
+        -- New Joinees (In Probation)
+        SELECT 
+            e.employeeuid AS employeeid, 
             e.firstname, 
             e.lastname, 
             e.mobile, 
             e.email,
             e.createdon,
-            NULL::timestamp without time zone as dol,
+            NULL::timestamp without time zone AS dol,
             s.ctc,
             EXTRACT(DAY FROM (timezone('utc', now()) - e.createdon))::bigint AS indays,
-            FALSE as isservingnotice,
-            TRUE as inprobation,
-            4 as resignationstatus,
-            NULL::text as reason,
+            FALSE AS isservingnotice,
+            TRUE AS inprobation,
+            4 AS resignationstatus,
+            NULL::text AS reason,
             h.paymentactiontype,
             h.comments,
-            CASE
-                WHEN h.salaryadhocid IS NULL THEN 0
-                ELSE h.salaryadhocid
-            END AS salaryadhocid
+            COALESCE(h.salaryadhocid, 0) AS salaryadhocid
         FROM employees e
         INNER JOIN employee_salary_detail s ON e.employeeuid = s.employeeid
         LEFT JOIN hike_bonus_salary_adhoc h ON h.employeeid = e.employeeuid
-          AND h.foryear = 2024 AND h.formonth = 3
-        WHERE EXTRACT(DAY FROM (timezone('utc', now()) - e.createdon)) <= _probationperioddays 
+          AND h.foryear = _foryear AND h.formonth = _formonth
+        WHERE EXTRACT(DAY FROM (timezone('utc', now()) - e.createdon)) <= _probationperioddays
         
         UNION ALL
         
-        SELECT e.employeeuid as employeeid, 
+        -- Exiting Employees (Serving Notice)
+        SELECT 
+            e.employeeuid AS employeeid, 
             e.firstname, 
             e.lastname, 
             e.mobile, 
             e.email,
             e.createdon,
-            n.officiallastworkingday as dol,
+            n.officiallastworkingday AS dol,
             s.ctc,
             EXTRACT(DAY FROM (n.officiallastworkingday - timezone('utc', now())))::bigint AS indays,
-            TRUE as isservingnotice,
-            CASE
-                WHEN EXTRACT(DAY FROM (timezone('utc', now()) - e.createdon)) <= _probationperioddays 
-                THEN TRUE 
-                ELSE FALSE
-            END as inprobation,
+            TRUE AS isservingnotice,
+            (EXTRACT(DAY FROM (timezone('utc', now()) - e.createdon)) <= _probationperioddays) AS inprobation,
             n.resignationstatus,
-            n.employeecomment as reason,
+            n.employeecomment AS reason,
             h.paymentactiontype,
             h.comments,
-            CASE
-                WHEN h.salaryadhocid IS NULL THEN 0
-                ELSE h.salaryadhocid
-            END AS salaryadhocid
+            COALESCE(h.salaryadhocid, 0) AS salaryadhocid
         FROM employees e
         INNER JOIN employee_salary_detail s ON e.employeeuid = s.employeeid
         INNER JOIN employee_notice_period n ON e.employeeuid = n.employeeid
         LEFT JOIN hike_bonus_salary_adhoc h ON h.employeeid = e.employeeuid 
           AND h.foryear = _foryear AND h.formonth = _formonth
-        WHERE n.isexited = false
+        WHERE n.isexited = FALSE
     ) sub;
 
-    RETURN _response;
-    
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
     _errortext := SQLERRM;
@@ -105,6 +94,6 @@ EXCEPTION WHEN OTHERS THEN
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_get_newjoinee_exiting'::varchar, 1, 0, _result);
-    RETURN json_build_object('error', _message)::jsonb;
+    _response := jsonb_build_object('error', _message);
 END;
-$function$;
+$procedure$;
