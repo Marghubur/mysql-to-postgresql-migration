@@ -1,17 +1,19 @@
-CREATE OR REPLACE FUNCTION public.sp_employee_assets_allocation_get_by_id(_employeeassetsallocationid bigint)
- RETURNS SETOF employee_assets_allocation
- LANGUAGE plpgsql
-AS $function$
+CREATE OR REPLACE PROCEDURE public.sp_employee_assets_allocation_get_by_id(
+    _employeeassetsallocationid bigint,
+    INOUT _result_ref refcursor DEFAULT 'rs_asset_by_id'
+)
+LANGUAGE plpgsql
+AS $procedure$
 DECLARE
     _sqlstate TEXT;
     _errorno TEXT;
     _errortext TEXT;
     _message TEXT;
-    _result character varying; -- FIXED: Changed TEXT to character varying
+    _result character varying;
 BEGIN
-    RETURN QUERY 
-    SELECT * FROM employee_assets_allocation 
-    WHERE employeeassetsallocationid = _employeeassetsallocationid;
+    OPEN _result_ref FOR 
+        SELECT * FROM employee_assets_allocation 
+        WHERE employeeassetsallocationid = _employeeassetsallocationid;
     
 EXCEPTION WHEN OTHERS THEN
     _sqlstate := SQLSTATE;
@@ -19,7 +21,6 @@ EXCEPTION WHEN OTHERS THEN
     _errorno := SQLSTATE;
     _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
     
-    -- FIXED: Added ::varchar casts so the logger doesn't crash
     CALL sp_logexception(_message, ''::varchar, 'sp_employee_assets_allocation_get_by_id'::varchar, 1, 0, _result);
 END;
-$function$;
+$procedure$;
