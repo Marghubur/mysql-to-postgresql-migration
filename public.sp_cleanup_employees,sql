@@ -1,0 +1,76 @@
+CREATE OR REPLACE PROCEDURE public.sp_cleanup_employees(
+  IN _companyid integer,
+  IN _adminemail bigint
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  _sqlstate TEXT;
+  _errorno TEXT;
+  _errortext TEXT;
+  _message TEXT;
+  _result TEXT;
+BEGIN
+  start transaction;
+ begin
+ -- sql_safe_updates ignored
+ delete from employee_performance
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employeepersonaldetail
+ where employeeuid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employeeprofessiondetail
+ where employeeuid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employee_declaration
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employee_leave_request
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employee_salary_detail
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from daily_attendance
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from project_members_detail
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employee_pf_detail
+ where employeeid not in (
+ select employeeuid from employees where companyid = _companyid and email = _adminemail
+ );
+ delete from employeelogin where companyid = _companyid and email != _adminemail;
+ delete from employees where companyid = _companyid and email != _adminemail;
+ truncate table hike_bonus_salary_adhoc;
+ truncate table employee_salary_change_history;
+ truncate table employee_bonus;
+ truncate table other_deduction_and_reimbursement_payment;
+ truncate table other_deduction_and_reimbursement_repayment;
+ truncate table additional_allowance;
+ truncate table payroll_monthly_detail;
+ truncate table employee_overtimetable;
+ truncate table salary_advance_request;
+ truncate table salary_advance_repayment;
+ truncate table leave_request_notification;
+ -- sql_safe_updates ignored
+ end;
+ commit;
+EXCEPTION WHEN OTHERS THEN
+  _sqlstate := SQLSTATE;
+  _errortext := SQLERRM;
+  _errorno := SQLSTATE;
+  _message := concat('ERROR ', _errorno, ' (', _sqlstate, '): ', _errortext);
+  CALL public.sp_logexception(_message, '', 'sp_cleanup_employees', 1::bit, 0::bit, _result);
+END;
+$$;
